@@ -137,8 +137,8 @@ class CliArgs:
         )
         serve.add_argument(
             "--host",
-            type=int,
-            help="Host for the webservice. Default is the device's public IP address. "
+            help="Host or IP address to bind to. Default is the device's LAN address. "
+            "Use 0.0.0.0 to listen on all IPv4 interfaces. "
             "Use 127.0.0.1 (localhost) to not be accessible by other devices "
             "on the local network.",
         )
@@ -250,6 +250,7 @@ def _run_main() -> None:
         from usdb_syncer.gui import webserver_dialog
 
         webserver_dialog.try_to_start_webserver(
+            host=settings.get_webserver_host(),
             port=settings.get_webserver_port(),
             title=settings.get_webserver_title(),
             show_nonlocal_songs=settings.get_webserver_show_nonlocal_songs(),
@@ -281,9 +282,20 @@ def _run_webserver(
     logger.logger.info("Webserver is running in headless mode. Press Ctrl+C to stop.")
     try:
         while True:
-            time.sleep(1)
+            # Download completion events release jobs from DownloadManager's queue.
+            QtCore.QCoreApplication.processEvents()
+            time.sleep(0.1)
     except KeyboardInterrupt:
+        pass
+    finally:
         webserver.stop()
+        from usdb_syncer.song_loader import DownloadManager
+
+        db.connect(utils.AppPaths.db)
+        try:
+            DownloadManager.quit(utils.ProgressProxy("Stopping downloads."))
+        finally:
+            db.close()
 
 
 def _excepthook(

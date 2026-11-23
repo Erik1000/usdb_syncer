@@ -177,6 +177,14 @@ class UsdbSong:
     def is_local(self) -> bool:
         return self.sync_meta is not None
 
+    def is_downloaded(self) -> bool:
+        """Return whether both the lyrics TXT and audio files exist locally."""
+        txt_path = self.txt_path()
+        audio_path = self.audio_path()
+        return bool(
+            txt_path and txt_path.is_file() and audio_path and audio_path.is_file()
+        )
+
     def is_pinned(self) -> bool:
         return self.sync_meta is not None and self.sync_meta.pinned
 

@@ -26,6 +26,23 @@
    </item>
    <item>
     <layout class="QFormLayout" name="formLayout">
+     <item row="0" column="0">
+      <widget class="QLabel" name="label_host">
+       <property name="text">
+        <string>Host:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QLineEdit" name="edit_host">
+       <property name="placeholderText">
+        <string>Automatic LAN address</string>
+       </property>
+       <property name="toolTip">
+        <string>IP address or hostname to bind to. Use 127.0.0.1 for local access or 0.0.0.0 for all IPv4 interfaces.</string>
+       </property>
+      </widget>
+     </item>
      <item row="1" column="0">
       <widget class="QLabel" name="label">
        <property name="text">

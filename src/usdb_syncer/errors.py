@@ -198,6 +198,17 @@ class PortInUseError(WebserverError):
         self.host = host
 
 
+class ServerBindError(WebserverError):
+    """Raised when the webserver cannot bind to its configured address."""
+
+    def __init__(self, host: str, port: int) -> None:
+        super().__init__(
+            f"Cannot bind webserver to {host}:{port}. Check the host and port."
+        )
+        self.host = host
+        self.port = port
+
+
 # separation
 
 

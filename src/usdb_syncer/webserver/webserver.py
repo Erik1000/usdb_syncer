@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import base64
+import errno
 import functools
 import itertools
-import json
 import logging
 import os
 import socket
@@ -19,11 +19,12 @@ import flask
 import qrcode
 import werkzeug.serving
 from PySide6 import QtCore
+from werkzeug.exceptions import HTTPException
 from werkzeug.serving import WSGIRequestHandler
 
 from usdb_syncer import SongId, db, errors, logger, utils
-from usdb_syncer.song_loader import DownloadManager
-from usdb_syncer.usdb_song import UsdbSong, UsdbSongEncoder
+from usdb_syncer.usdb_song import UsdbSong
+from usdb_syncer.webserver import api
 
 _COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 
@@ -99,11 +100,13 @@ def _get_songs(
             key=lambda s: like_counter[s],
             reverse=request.args.get("sort_order") == "desc",
         )
-    return [
-        s
-        for i in itertools.islice(song_ids, offset, offset + limit)
-        if (s := UsdbSong.get(i))
-    ]
+    songs = (
+        song
+        for song_id in song_ids
+        if (song := UsdbSong.get(song_id))
+        and (show_nonlocal_songs or song.is_downloaded())
+    )
+    return list(itertools.islice(songs, offset, offset + limit))
 
 
 def _index(
@@ -169,23 +172,13 @@ def _fragments_songs(
     )
 
 
-def _api_audio(song_id: int) -> flask.Response:
-    song = UsdbSong.get(SongId(song_id))
-    if not song:
-        return flask.abort(404, "Song not found")
-    audio_path = song.audio_path()
-    if not audio_path or not audio_path.is_file():
-        return flask.abort(404, "Audio file not found for this song")
-    return flask.send_file(audio_path, mimetype="audio/mp3")
-
-
 def _download(song_id: int, start: bool) -> UsdbSong:
-    song = UsdbSong.get(SongId(song_id))
-    if not song:
-        return flask.abort(404, "Song not found")
-    if start and song.status.can_be_downloaded():
-        DownloadManager.download([song], utils.ProgressProxy(""))
-    return song
+    if not start:
+        return api.get_song(song_id)
+    force = flask.request.args.get("force_redownload", "false")
+    if force not in {"true", "false"}:
+        flask.abort(400, "force_redownload must be true or false")
+    return api.download_song(song_id, force_redownload=force == "true")
 
 
 def _get_liked_songs(session_id: str) -> set[SongId]:
@@ -222,12 +215,30 @@ def _fragments_like(
     return resp
 
 
-def _create_app(  # noqa: C901
+def create_app(  # noqa: C901
     title: str, *, show_nonlocal_songs: bool, allow_downloading: bool
 ) -> flask.Flask:
+    """Create the browser interface and REST API with shared server capabilities."""
     app = flask.Flask(__name__)
     like_counter: Counter[SongId] = Counter()
     session_id = str(uuid.uuid4())
+    app.register_blueprint(
+        api.create_api(
+            lambda: _get_songs(flask.request, show_nonlocal_songs, like_counter),
+            show_nonlocal_songs=show_nonlocal_songs,
+            allow_downloading=allow_downloading,
+        )
+    )
+
+    @app.errorhandler(HTTPException)
+    def http_error(error: HTTPException) -> flask.Response:
+        response = app.make_response(error.get_response())
+        if flask.request.path == "/api" or flask.request.path.startswith("/api/"):
+            response.data = app.json.dumps(
+                {"error": {"code": error.code, "message": error.description}}
+            )
+            response.content_type = "application/json"
+        return response
 
     @app.route("/")
     def index() -> str:
@@ -240,32 +251,6 @@ def _create_app(  # noqa: C901
         return _fragments_songs(
             show_nonlocal_songs, allow_downloading, like_counter, session_id
         )
-
-    @app.route("/api/songs")
-    def api_songs() -> flask.Response:
-        # Flask's default JSON encoder cannot serialize UsdbSong; reuse the
-        # project's encoder so /api/songs returns application/json instead of 500.
-        songs = _get_songs(flask.request, show_nonlocal_songs, like_counter)
-        return flask.Response(
-            json.dumps(songs, cls=UsdbSongEncoder, ensure_ascii=False),
-            mimetype="application/json",
-        )
-
-    @app.route("/api/songs/<int:selected_id>/audio")
-    def api_audio(selected_id: int) -> flask.Response:
-        return _api_audio(selected_id)
-
-    @app.route("/api/songs/<int:selected_id>/download")
-    def api_get_download(selected_id: int) -> dict[str, str]:
-        if not allow_downloading:
-            return flask.abort(403, "Downloading is not allowed")
-        return {"status": str(_download(selected_id, start=False).status)}
-
-    @app.post("/api/songs/<int:selected_id>/download")
-    def api_post_download(selected_id: int) -> dict[str, str]:
-        if not allow_downloading:
-            return flask.abort(403, "Downloading is not allowed")
-        return {"status": str(_download(selected_id, start=True).status)}
 
     @app.route("/fragments/songs/<int:selected_id>/download")
     def fragments_get_download(selected_id: int) -> str:
@@ -308,6 +293,10 @@ def _create_app(  # noqa: C901
     return app
 
 
+# Keep the former private factory available to existing integrations.
+_create_app = create_app
+
+
 class _CustomRequestHandler(WSGIRequestHandler):
     def log(self, type: str, message: str, *args: Any) -> None:  # noqa: A002, ARG002
         # don't log requests to info level
@@ -346,16 +335,20 @@ class _WebserverManager:
             return False
         if title:
             cls.title = title
-        app = _create_app(
+        app = create_app(
             cls.title,
             show_nonlocal_songs=show_nonlocal_songs,
             allow_downloading=allow_downloading,
         )
-        cls.host = host or get_local_ip()
+        cls.host = (host or "").strip() or get_local_ip()
         cls._validate_port(port)
-        cls._server = werkzeug.serving.make_server(
-            cls.host, cls.port, app, request_handler=_CustomRequestHandler
-        )
+        try:
+            cls._server = werkzeug.serving.make_server(
+                cls.host, cls.port, app, request_handler=_CustomRequestHandler
+            )
+        except (OSError, SystemExit) as error:
+            # Werkzeug exits on bind failure; report it to the GUI/CLI instead.
+            raise errors.ServerBindError(cls.host, cls.port) from error
         cls.port = cls._server.socket.getsockname()[1]
         cls._thread = _WebserverThread(cls._server)
         cls._thread.start()
@@ -366,9 +359,10 @@ class _WebserverManager:
         if not cls._server or not cls._thread:
             return False
         cls._server.shutdown()
+        cls._server.server_close()
         cls._server = None
         cls._thread.quit()
-        cls._thread.wait(10)
+        cls._thread.wait()
         cls._thread = None
         return True
 
@@ -397,12 +391,21 @@ class _WebserverManager:
             if hasattr(os, "geteuid") and os.geteuid() != 0:
                 raise errors.PrivilegedPortError(port)
 
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                s.bind((cls.host, port))
-            except OSError as e:
+        try:
+            family, socktype, proto, _, sockaddr = socket.getaddrinfo(
+                cls.host,
+                port,
+                family=socket.AF_INET6 if ":" in cls.host else socket.AF_INET,
+                type=socket.SOCK_STREAM,
+            )[0]
+            with socket.socket(family, socktype, proto) as s:
+                if sys.platform != "win32":
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(sockaddr)
+        except OSError as e:
+            if e.errno == errno.EADDRINUSE:
                 raise errors.PortInUseError(port, cls.host) from e
+            raise errors.ServerBindError(cls.host, port) from e
 
         cls.port = port
 
@@ -435,7 +438,14 @@ def is_running() -> bool:
 
 
 def address() -> str:
-    return f"http://{_WebserverManager.host}:{_WebserverManager.port}"
+    host = _WebserverManager.host
+    if host == "0.0.0.0":  # noqa: S104 - display a usable URL for wildcard binds
+        host = get_local_ip()
+    elif host == "::":
+        host = "::1"
+    if ":" in host:
+        host = f"[{host}]"
+    return f"http://{host}:{_WebserverManager.port}"
 
 
 @functools.lru_cache(maxsize=1)

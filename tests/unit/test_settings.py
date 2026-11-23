@@ -62,6 +62,13 @@ def test_persisting_saved_search(temp: bool, isolated_qsettings: Path) -> None:
     assert len(settings.get_saved_searches()) == 2
 
 
+@pytest.mark.parametrize("temp", [False, True])
+def test_webserver_host_setting(temp: bool, isolated_qsettings: Path) -> None:
+    assert settings.get_webserver_host() == ""
+    settings.set_webserver_host(" 127.0.0.1 ", temp=temp)
+    assert settings.get_webserver_host() == "127.0.0.1"
+
+
 def test_saved_search_json_round_trip() -> None:
     """Saved searches must be (de)serializable from builtin types only.
 

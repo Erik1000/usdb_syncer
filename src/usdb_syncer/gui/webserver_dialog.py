@@ -24,6 +24,7 @@ class WebserverDialog(Ui_Dialog, QtWidgets.QDialog):
     def _update_ui(self) -> None:
         running = webserver.is_running()
         self.edit_title.setEnabled(not running)
+        self.edit_host.setEnabled(not running)
         self.box_port.setEnabled(not running)
         self.checkBox_only_local_songs.setEnabled(not running)
         self.checkBox_allow_downloads.setEnabled(not running)
@@ -42,6 +43,7 @@ class WebserverDialog(Ui_Dialog, QtWidgets.QDialog):
 
     def _start(self) -> None:
         try_to_start_webserver(
+            host=self.edit_host.text(),
             title=self.edit_title.text(),
             port=self.box_port.value(),
             show_nonlocal_songs=not self.checkBox_only_local_songs.isChecked(),
@@ -56,6 +58,7 @@ class WebserverDialog(Ui_Dialog, QtWidgets.QDialog):
 
     def _load_settings(self) -> None:
         self.edit_title.setText(settings.get_webserver_title())
+        self.edit_host.setText(settings.get_webserver_host())
         self.box_port.setValue(settings.get_webserver_port())
         self.checkBox_only_local_songs.setChecked(
             not settings.get_webserver_show_nonlocal_songs()
@@ -67,6 +70,7 @@ class WebserverDialog(Ui_Dialog, QtWidgets.QDialog):
 
     def _save_settings(self) -> None:
         settings.set_webserver_title(self.edit_title.text())
+        settings.set_webserver_host(self.edit_host.text())
         settings.set_webserver_port(self.box_port.value())
         settings.set_webserver_show_nonlocal_songs(
             not self.checkBox_only_local_songs.isChecked()
@@ -90,9 +94,11 @@ def try_to_start_webserver(
     title: str | None = None,
     show_nonlocal_songs: bool = False,
     allow_downloading: bool = False,
+    host: str | None = None,
 ) -> None:
     try:
         webserver.start(
+            host=host,
             port=port,
             title=title,
             show_nonlocal_songs=show_nonlocal_songs,

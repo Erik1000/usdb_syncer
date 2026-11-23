@@ -1,4 +1,17 @@
-{% if song.sync_meta %}
+{% set downloaded = song.is_downloaded() %}
+{% if allow_downloading and song.status|string in ['Pending', 'Downloading'] %}
+    <span
+    class="text-lg md:text-2xl animate-pulse"
+    title="Downloading"
+    hx-target="closest td"
+    hx-swap="innerHTML"
+    hx-get="/fragments/songs/{{ song.song_id }}/download"
+    hx-trigger="every 3s"
+    >
+        ⤓
+    </span>
+{% else %}
+    {% if downloaded %}
     <button
     class="play-button text-lg md:text-2xl"
     song_id="{{ song.song_id }}"
@@ -7,23 +20,14 @@
     >
     ▶
     </button>
-{% elif allow_downloading %}
-    {% if song.status|string in ['Pending', 'Downloading'] %}
-        <span
-        class="text-lg md:text-2xl animate-pulse"
-        title="Downloading"
-        hx-swap="outerHTML"
-        hx-get="/fragments/songs/{{ song.song_id }}/download"
-        hx-trigger="every 3s"
-        >
-            ⤓
-        </span>
-    {% else %}
+    {% endif %}
+    {% if allow_downloading and not (song.sync_meta and song.sync_meta.pinned) %}
         <button
         class="text-lg md:text-2xl"
-        title="Request download"
-        hx-swap="outerHTML"
-        hx-post="/fragments/songs/{{ song.song_id }}/download"
+        title="{{ 'Force re-download' if downloaded else 'Request download' }}"
+        hx-target="closest td"
+        hx-swap="innerHTML"
+        hx-post="/fragments/songs/{{ song.song_id }}/download{{ '?force_redownload=true' if downloaded else '' }}"
         >
             ⤓
         </button>

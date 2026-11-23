@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from usdb_syncer import SongId, SyncMetaId
-from usdb_syncer.db import JobStatus
+from usdb_syncer.db import DownloadStatus, JobStatus
 from usdb_syncer.meta_tags import ImageMetaTags, MetaTags
 from usdb_syncer.sync_meta import Resource, ResourceFile, SyncMeta
 from usdb_syncer.usdb_scraper import SongDetails
@@ -58,6 +58,21 @@ def resource_dir_fixture() -> Path:
 @pytest.fixture(name="song")
 def usdb_song_fixture() -> UsdbSong:
     return example_usdb_song()
+
+
+@pytest.fixture
+def downloaded_song(song: UsdbSong, tmp_path: Path) -> UsdbSong:
+    """A song with the required lyrics and audio files on disk."""
+    assert song.sync_meta
+    song.sync_meta.path = tmp_path / song.sync_meta.path.name
+    song.sync_meta.txt = Resource(
+        status=JobStatus.SUCCESS,
+        file=ResourceFile("song.txt", 1, "example.org/song.txt"),
+    )
+    (tmp_path / "song.txt").write_text(example_notes_str(), encoding="utf-8")
+    (tmp_path / "song.mp3").write_bytes(b"example audio")
+    song.status = DownloadStatus.SYNCHRONIZED
+    return song
 
 
 def example_usdb_song() -> UsdbSong:

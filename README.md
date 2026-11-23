@@ -56,6 +56,20 @@ The package has a defined entry point for the GUI. Simply run:
 uv run usdb_syncer
 ```
 
+### Webserver and REST API
+
+Start a server with an explicit host and port:
+
+```bash
+uv run usdb_syncer serve --host 127.0.0.1 --port 8080 --show-nonlocal --allow-downloading
+```
+
+Use `0.0.0.0` to listen on all IPv4 interfaces, then connect using the server's actual IP address. The desktop webserver dialog also saves the host for automatic startup. Downloads use the configured song folder, credentials, and resource settings.
+
+The REST API supports searching songs, reading metadata and download status, streaming local audio, and requesting downloads. `POST /api/songs/123/download` with the JSON body `{"force_redownload":true}` forces unchanged resources to download again. Accepted downloads return HTTP 202; poll `GET /api/songs/123/download` for completion.
+
+See the [USDB Syncer API skill](.agents/skills/usdb-syncer-api/SKILL.md) for endpoints, filters, examples, and errors. The API has no authentication; expose it only on a trusted network or behind an authenticated proxy.
+
 ### Run tests
 
 [tox](https://github.com/tox-dev/tox) makes it easy to run the full CI pipeline on your local machine, i.e., if the pipeline passes on your machine there is a good chance it will also pass on the build server.

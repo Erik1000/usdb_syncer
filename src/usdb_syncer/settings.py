@@ -271,6 +271,7 @@ class SettingKey(Enum):
     SAVED_SEARCHES = "saved_searches"
     DEFAULT_SAVED_SEARCH = "default_saved_search"
     WEBSERVER_TITLE = "webserver/title"
+    WEBSERVER_HOST = "webserver/host"
     WEBSERVER_PORT = "webserver/port"
     WEBSERVER_SHOW_NONLOCAL_SONGS = "webserver/show_nonlocal_songs"
     WEBSERVER_ALLOW_DOWNLOADING = "webserver/allow_downloading"
@@ -1522,6 +1523,14 @@ def get_webserver_title() -> str:
 
 def set_webserver_title(title: str, temp: bool = False) -> None:
     _Settings.set_native(SettingKey.WEBSERVER_TITLE, title, temp=temp)
+
+
+def get_webserver_host() -> str:
+    return _Settings.get_str(SettingKey.WEBSERVER_HOST, "")
+
+
+def set_webserver_host(host: str, temp: bool = False) -> None:
+    _Settings.set_native(SettingKey.WEBSERVER_HOST, host.strip(), temp=temp)
 
 
 def get_webserver_port() -> int:
